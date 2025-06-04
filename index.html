@@ -34,7 +34,7 @@
 <canvas id="gameCanvas" width="800" height="600"></canvas>
 
 <script>
-
+let light = { x: 100, y: 100 };
 let powerups = [];
 const shieldDuration = 300;
 
@@ -69,12 +69,47 @@ const keys = {};
 document.addEventListener('keydown', e => keys[e.key] = true);
 document.addEventListener('keyup', e => keys[e.key] = false);
 
-const walls = [
-  { x: 200, y: 150, width: 400, height: 20 },
-  { x: 200, y: 430, width: 400, height: 20 },
-  { x: 100, y: 250, width: 20, height: 100 },
-  { x: 680, y: 250, width: 20, height: 100 }
+let walls = [
+  { x: 250, y: 150, width: 300, height: 10 },
+  { x: 250, y: 440, width: 300, height: 10 },
+  { x: 100, y: 250, width: 10, height: 100 },
+  { x: 690, y: 250, width: 10, height: 100 }
 ];
+
+function generateRandomWalls() {
+  walls = [];
+  const wallCount = 8;
+  for (let i = 0; i < wallCount; i++) {
+    const width = 60 + Math.random() * 120;
+    const height = 20 + Math.random() * 100;
+    const x = Math.random() * (canvas.width - width);
+    const y = Math.random() * (canvas.height - height);
+    walls.push({ x, y, width, height });
+  }
+}
+
+function getSafeSpawn(size) {
+  let tries = 100;
+  while (tries-- > 0) {
+    const x = size + Math.random() * (canvas.width - 2 * size);
+    const y = size + Math.random() * (canvas.height - 2 * size);
+
+    const tankRect = {
+      x: x - size / 2,
+      y: y - size / 2,
+      width: size,
+      height: size
+    };
+
+    // Check against walls
+    const collides = walls.some(w => rectIntersect(tankRect, w));
+
+    if (!collides) return { x, y };
+  }
+
+  console.warn("Couldn't find safe spawn, using fallback.");
+  return { x: canvas.width / 2, y: canvas.height / 2 };
+}
 
 function rectIntersect(a, b) {
   return (
@@ -99,48 +134,70 @@ class Tank {
     this.health = 100;
     this.shield = 0;
   }
+drawShadow() {
+    const dx = this.x - light.x;
+    const dy = this.y - light.y;
+    const length = 40;
+    const angle = Math.atan2(dy, dx);
 
-  draw() {
-    const half = this.size / 2;
+    const shadowOffsetX = Math.cos(angle) * length;
+    const shadowOffsetY = Math.sin(angle) * length;
+
+    const w = this.size;
+    const h = this.size * 0.6;
+
     ctx.save();
-    ctx.translate(this.x, this.y);
+    ctx.translate(this.x + shadowOffsetX, this.y + shadowOffsetY);
     ctx.rotate(this.angle);
-
-    // Tank base (simulate 3D with shading)
-    // Top
-    // Gradient tank top to simulate lighting
-    const grd = ctx.createLinearGradient(-half, -half, half, half);
-    grd.addColorStop(0, this.shadeColor(this.color, 30));  // lighter top-left
-    grd.addColorStop(1, this.shadeColor(this.color, -30)); // darker bottom-right
-    ctx.fillStyle = grd;
-    ctx.fillRect(-half, -half, this.size, this.size);
-
-
-    // Front face (darker shade)
-    ctx.fillStyle = this.shadeColor(this.color, -20);
-    ctx.fillRect(-half, half - 5, this.size, 5);
-
-    // Barrel (simulate depth)
-    ctx.fillStyle = '#111';
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
     ctx.beginPath();
-    ctx.moveTo(0, -5);
-    ctx.lineTo(this.size / 2 + 10, -3);
-    ctx.lineTo(this.size / 2 + 10, 3);
-    ctx.lineTo(0, 5);
-    ctx.closePath();
+    ctx.ellipse(5, 10, w / 2, h / 3, 0, 0, Math.PI * 2);
     ctx.fill();
-
     ctx.restore();
+}
+draw() {
+  const w = this.size;
+  const h = this.size * 0.6;
 
-    this.drawHealthBar();
+  ctx.save();
+  ctx.translate(this.x, this.y);
+  ctx.rotate(this.angle);
 
-    for (let bullet of this.bullets) {
-        ctx.beginPath();
-        ctx.arc(bullet.x, bullet.y, bullet.radius, 0, Math.PI * 2);
-        ctx.fillStyle = 'white';
-        ctx.fill();
-    }
-   }   
+  // Tank body
+  ctx.fillStyle = this.color;
+  ctx.fillRect(-w / 2, -h / 2, w, h);
+
+  // Turret
+  ctx.fillStyle = '#222';
+  ctx.beginPath();
+  ctx.arc(0, 0, w / 4, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Barrel
+  ctx.fillStyle = '#111';
+  ctx.fillRect(w / 4, -2, 18, 4);
+
+  // Shield
+  if (this.shield > 0) {
+    ctx.beginPath();
+    ctx.arc(0, 0, this.size * 0.8, 0, Math.PI * 2);
+    ctx.strokeStyle = 'cyan';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  }
+
+  ctx.restore();
+
+  this.drawHealthBar();
+
+  // Draw bullets
+  for (let bullet of this.bullets) {
+    ctx.fillStyle = 'white';
+    ctx.beginPath();
+    ctx.arc(bullet.x, bullet.y, bullet.radius, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
 
 // Helper for shading color
 shadeColor(color, percent) {
@@ -222,17 +279,18 @@ shadeColor(color, percent) {
     return walls.some(w => rectIntersect(rect, w));
   }
 
-  fireBullet() {
-    const speed = 5;
-    const bullet = {
-      x: this.x + Math.cos(this.angle) * this.size / 2,
-      y: this.y + Math.sin(this.angle) * this.size / 2,
-      dx: Math.cos(this.angle) * speed,
-      dy: Math.sin(this.angle) * speed,
-      radius: 5
-    };
-    this.bullets.push(bullet);
-  }
+fireBullet() {
+  const speed = 5;
+  const bullet = {
+    x: this.x + Math.cos(this.angle) * this.size / 2,
+    y: this.y + Math.sin(this.angle) * this.size / 2,
+    dx: Math.cos(this.angle) * speed,
+    dy: Math.sin(this.angle) * speed,
+    radius: 5,
+    bounceCount: 0
+  };
+  this.bullets.push(bullet);
+}
     checkPowerups() {
         for (let i = powerups.length - 1; i >= 0; i--) {
             const p = powerups[i];
@@ -244,21 +302,46 @@ shadeColor(color, percent) {
             }
         }
     }
-  updateBullets() {
-    for (let bullet of this.bullets) {
-      bullet.x += bullet.dx;
-      bullet.y += bullet.dy;
+updateBullets() {
+  for (let bullet of this.bullets) {
+    bullet.x += bullet.dx;
+    bullet.y += bullet.dy;
 
-      // Bullet-wall collision
-      for (let wall of walls) {
-        if (bullet.x > wall.x && bullet.x < wall.x + wall.width &&
-            bullet.y > wall.y && bullet.y < wall.y + wall.height) {
-          bullet.hit = true;
+    for (let wall of walls) {
+      if (
+        bullet.x + bullet.radius > wall.x &&
+        bullet.x - bullet.radius < wall.x + wall.width &&
+        bullet.y + bullet.radius > wall.y &&
+        bullet.y - bullet.radius < wall.y + wall.height
+      ) {
+        // Determine axis of bounce
+        const overlapX = Math.min(
+          bullet.x + bullet.radius - wall.x,
+          wall.x + wall.width - (bullet.x - bullet.radius)
+        );
+        const overlapY = Math.min(
+          bullet.y + bullet.radius - wall.y,
+          wall.y + wall.height - (bullet.y - bullet.radius)
+        );
+
+        if (overlapX < overlapY) {
+          bullet.dx *= -1; // Horizontal bounce
+        } else {
+          bullet.dy *= -1; // Vertical bounce
         }
+
+        bullet.bounceCount++;
+        if (bullet.bounceCount > 4) bullet.hit = true;
       }
     }
-    this.bullets = this.bullets.filter(b => !b.hit && b.x > 0 && b.x < canvas.width && b.y > 0 && b.y < canvas.height);
   }
+
+  this.bullets = this.bullets.filter(
+    b => !b.hit &&
+         b.x > 0 && b.x < canvas.width &&
+         b.y > 0 && b.y < canvas.height
+  );
+}
 
 }
 
@@ -279,30 +362,43 @@ const controls2 = {
   fire: 'f'
 };
 
-const player1 = new Tank(100, 100, '#0077cc', controls1);
-const player2 = new Tank(600, 400, '#22aa22', controls2);
+const spawn1 = getSafeSpawn(30);
+const spawn2 = getSafeSpawn(30);
+
+const player1 = new Tank(spawn1.x, spawn1.y, '#0077cc', controls1);
+const player2 = new Tank(spawn2.x, spawn2.y, '#22aa22', controls2);
 
 
 function drawWalls() {
   for (let wall of walls) {
-    // Main wall face
-    ctx.fillStyle = '#666';
+    const depth = 6;
+
+    // Main wall top
+    ctx.fillStyle = '#888';
     ctx.fillRect(wall.x, wall.y, wall.width, wall.height);
 
-    // Top edge highlight
-    ctx.fillStyle = '#999';
-    ctx.fillRect(wall.x, wall.y, wall.width, 3);
+    // Right face
+    ctx.fillStyle = '#555';
+    ctx.beginPath();
+    ctx.moveTo(wall.x + wall.width, wall.y);
+    ctx.lineTo(wall.x + wall.width + depth, wall.y + depth);
+    ctx.lineTo(wall.x + wall.width + depth, wall.y + wall.height + depth);
+    ctx.lineTo(wall.x + wall.width, wall.y + wall.height);
+    ctx.closePath();
+    ctx.fill();
 
-    // Side shading (right or bottom)
-    if (wall.height > wall.width) {
-      ctx.fillStyle = '#444';
-      ctx.fillRect(wall.x + wall.width - 3, wall.y, 3, wall.height);
-    } else {
-      ctx.fillStyle = '#444';
-      ctx.fillRect(wall.x, wall.y + wall.height - 3, wall.width, 3);
-    }
+    // Front face
+    ctx.fillStyle = '#333';
+    ctx.beginPath();
+    ctx.moveTo(wall.x, wall.y + wall.height);
+    ctx.lineTo(wall.x + wall.width, wall.y + wall.height);
+    ctx.lineTo(wall.x + wall.width + depth, wall.y + wall.height + depth);
+    ctx.lineTo(wall.x + depth, wall.y + wall.height + depth);
+    ctx.closePath();
+    ctx.fill();
   }
 }
+
 
 
 function checkBulletHits() {
@@ -340,35 +436,47 @@ function checkBulletHits() {
 }
 
 
+
 function gameLoop() {
-  if (!gameStarted) return;
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  drawWalls();
+    ctx.fillStyle = '#1a1a1a';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    if (!gameStarted) return;
+    const gradient = ctx.createRadialGradient(
+        canvas.width / 2, canvas.height / 2, 50,
+        canvas.width / 2, canvas.height / 2, 400
+    );
+    gradient.addColorStop(0, '#222');
+    gradient.addColorStop(1, '#111');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    drawWalls();
 
-  player1.update();
-  player2.update();
+    player1.update();
+    player2.update();
 
-  player1.draw();
-  player2.draw();
+    player1.draw();
+    player2.draw();
 
-  checkBulletHits();
+    checkBulletHits();
 
-  requestAnimationFrame(gameLoop);
+    requestAnimationFrame(gameLoop);
 
-  updateExplosions();
-drawExplosions();
-drawPowerups();
+    updateExplosions();
+    drawExplosions();
+    drawPowerups();
 }
 
 function startGame() {
+    generateRandomWalls();
     setInterval(() => {
         const x = 100 + Math.random() * 600;
         const y = 100 + Math.random() * 400;
         powerups.push({ x, y, type: 'shield' });
     }, 10000);
-  document.getElementById('menu').style.display = 'none';
-  gameStarted = true;
-  gameLoop();
+    document.getElementById('menu').style.display = 'none';
+    gameStarted = true;
+    gameLoop();
 }
 
 function drawPowerups() {
